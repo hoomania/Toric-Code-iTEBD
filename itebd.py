@@ -313,7 +313,7 @@ class iTEBD:
 
         return sum(expectation_value)
 
-    def iTEBD_trotter_manager(
+    def delta_manager(
             self,
             iteration: int,
             domains: int,
@@ -323,9 +323,9 @@ class iTEBD:
     ) -> np.ndarray:
 
         result = {
+            'mps': self.initial_mps_nodes(),
             'dist': np.inf,
             'energy': np.inf,
-            'mps': self.initial_mps_nodes()
         }
 
         if iteration % domains != 0:
@@ -334,24 +334,24 @@ class iTEBD:
         iter_value = int(iteration / domains)
         for delta in np.linspace(delta_start, delta_end, domains):
             self.delta = delta
-            itebd_result = self.iTEBD(
+            evo_result = self.evolution(
                 result['mps'],
                 self.suzuki_trotter(delta),
                 iter_value,
                 accuracy
             )
 
-            if itebd_result['dist'] < result['dist']:
+            if evo_result['dist'] < result['dist']:
                 result = {
-                    'dist': itebd_result['dist'],
-                    'energy': itebd_result['energy'],
-                    'mps': itebd_result['mps']
+                    'mps': evo_result['mps'],
+                    'dist': evo_result['dist'],
+                    'energy': evo_result['energy'],
+                    'energy_history': evo_result['energy_history']
                 }
 
-        # print(f'Best Energy: {result["energy"]}')
         return result['mps']
 
-    def iTEBD(
+    def evolution(
             self,
             mps_chain_cell: np.ndarray,
             trotter_tensor: list,
