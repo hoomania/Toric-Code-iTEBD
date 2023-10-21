@@ -2,9 +2,6 @@ from ncon import ncon
 from scipy.linalg import expm
 from tqdm import tqdm
 import numpy as np
-import os
-import pandas as pd
-import time
 
 
 class iTEBD:
@@ -332,6 +329,8 @@ class iTEBD:
             iteration -= iteration % domains
 
         iter_value = int(iteration / domains)
+
+        print(f'iTEBD is running on physical dim={self.phy_dim} and virtual dim={self.vir_dim}')
         for delta in np.linspace(delta_start, delta_end, domains):
             self.delta = delta
             evo_result = self.evolution(
@@ -371,7 +370,7 @@ class iTEBD:
         odd_even_indexes = self.even_odd_index_generator()
         # <<<< initial parameters
 
-        prg = tqdm(range(sampling, iteration + sampling + 2), desc=f'iTEBD is running, delta = {self.delta:.5f}',
+        prg = tqdm(range(sampling, iteration + sampling + 2), desc=f'delta= {self.delta:.5f}',
                    leave=True)
 
         for i in prg:
@@ -414,154 +413,18 @@ class iTEBD:
 
         return best_result
 
-    def save_data(
-            self,
-            data_list: list,
-            final_iteration: int,
-            accuracy: float
-    ) -> None:
-        file_name_capsule = f'{int(time.time())}_history_capsule.csv'
-        file_name_element = f'{int(time.time())}_history_element.csv'
-        file_name_energy = f'{int(time.time())}_history_energy.csv'
-
-        data_profile = {
-            'hamiltonian_title': [self.hamil_title],
-            'phy_dim': [self.phy_dim],
-            'vir_dim': [self.vir_dim],
-            'trotter_delta': [self.delta],
-            'final_iteration': [final_iteration],
-            'accuracy': [accuracy],
-            'file_name_capsule': [file_name_capsule],
-            'file_name_element': [file_name_element],
-            'file_name_energy': [file_name_energy],
-        }
-
-        df = pd.DataFrame(data_profile)
-        output_path = 'mps_data/data_profile.csv'
-        df.to_csv(output_path, mode='a', header=not os.path.exists(output_path))
-
-        df = pd.DataFrame(data_list[0])
-        df.to_csv(f'mps_data/{file_name_capsule}', header=False, index=False)
-
-        df = pd.DataFrame(data_list[1])
-        df.to_csv(f'mps_data/{file_name_element}', header=False, index=False)
-
-        df = pd.DataFrame(data_list[2])
-        df.to_csv(f'mps_data/{file_name_energy}', header=False, index=False)
-
-    def iTEBD_diagram(
-            self,
-            iteration: int,
-            accuracy: float = 1e-8,
-            delta: float = 0.01,
-    ) -> dict:
-        # >>>> initial parameters
-        mps_chain_cell = self.initial_mps_nodes()
-        exp_tensor = self.suzuki_trotter(delta)
-
-        # lambda_b, gamma_a, lambda_a, gamma_b, lambda_b
-        chain_indices = [
-            [3, 0, 1, 2, 3],
-            [1, 2, 3, 0, 1],
-        ]
-
-        tensor_chain = [0 for _ in range(6)]
-        links = [
-            [-1, 1],
-            [1, 2, 3],
-            [3, 4],
-            [4, 5, 6],
-            [6, -2],
-            [2, -3, -4, 5],
-        ]
-        final_order = [-1, -3, -4, -2]
-
-        expectation_diff = [0, 0]
-        expectation_value = []
-        # <<<< initial parameters
-
-        final_iteration = 0
-        ph_vi_dimension = self.phy_dim * self.vir_dim
-        chain_capsule_history = []
-        chain_element_history = []
-        # for i in range(iteration):
-        for i in tqdm(range(iteration), ncols=100, desc="iTEBD is running: "):
-            steps = i % 2
-
-            for j in range(5):
-                tensor_chain[j] = mps_chain_cell[chain_indices[steps][j]]
-            tensor_chain[5] = exp_tensor[steps]
-
-            chain_element_row = np.reshape(tensor_chain[0], (-1,))
-            for w in range(1, 5):
-                chain_element_row = np.hstack([chain_element_row, np.reshape(tensor_chain[w], (-1,))])
-            chain_element_history.append(chain_element_row)
-
-            tensor_contraction = ncon(tensor_chain, links, None, final_order)
-            chain_capsule_history.append(tensor_contraction.reshape(-1, ))
-            # implode
-            implode = np.reshape(tensor_contraction, [ph_vi_dimension, ph_vi_dimension])
-
-            # SVD decomposition
-            svd_u, svd_sig, svd_v = np.linalg.svd(implode)
-
-            # SVD truncate
-            mps_chain_cell[chain_indices[steps][1]] = np.reshape(
-                svd_u[:, :self.vir_dim],
-                [self.vir_dim, self.phy_dim, self.vir_dim]
-            )
-
-            mps_chain_cell[chain_indices[steps][2]] = np.diag(
-                svd_sig[:self.vir_dim] / sum(svd_sig[:self.vir_dim])
-            )
-
-            mps_chain_cell[chain_indices[steps][3]] = np.reshape(
-                svd_v[:self.vir_dim, :],
-                [self.vir_dim, self.phy_dim, self.vir_dim]
-            )
-
-            inverse_lr_nodes = 1 / np.diag(mps_chain_cell[chain_indices[steps][4]])
-
-            mps_chain_cell[chain_indices[steps][1]] = ncon(
-                [np.diag(inverse_lr_nodes), mps_chain_cell[chain_indices[steps][1]]],
-                [[-1, 1], [1, -2, -3]])
-            mps_chain_cell[chain_indices[steps][3]] = ncon(
-                [mps_chain_cell[chain_indices[steps][3]], np.diag(inverse_lr_nodes)],
-                [[-1, -2, 1], [1, -3]])
-
-            exp_value = self.expectation_energy(mps_chain_cell)
-            expectation_value.append(exp_value)
-            expectation_diff[i % 2] = exp_value
-            if i % 10000 == 0:
-                # print(f'Iteration: {i}')
-                if np.abs(expectation_diff[0] - expectation_diff[1]) < accuracy:
-                    final_iteration = i
-                    break
-
-        self.save_data(
-            [chain_capsule_history, chain_element_history, expectation_value],
-            final_iteration,
-            accuracy
-        )
-
-        return {
-            'iteration': final_iteration,
-            # 'energy_expectation_value': expectation_value,
-            'mps_chain': mps_chain_cell,
-        }
-
     def even_odd_index_generator(self) -> np.ndarray:
         len_mps = self.unit_cells * 4
-        len_itebd_cell = int(len_mps / self.unit_cells)
-
         indexes = [i % len_mps for i in range(len_mps - 1, len_mps * 2)]
         start_index = [0, 2]  # even, odd
-        start_index_itebd = [len_itebd_cell * i for i in range(self.unit_cells)]
+        start_index_mps = [4 * i for i in range(self.unit_cells)]
+
         index_divider = []
         for p in range(2):
             for q in range(self.unit_cells):
                 index = []
-                for j in range(len_itebd_cell + 1):
-                    index.append(indexes[(start_index_itebd[q] + start_index[p] + j) % len_mps])
+                for j in range(5):
+                    index.append(indexes[(start_index_mps[q] + start_index[p] + j) % len_mps])
                 index_divider.append(index)
-        return np.reshape(index_divider, (2, self.unit_cells, len_itebd_cell + 1))
+
+        return np.reshape(index_divider, (2, self.unit_cells, 5))
