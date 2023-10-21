@@ -41,6 +41,7 @@ class iTEBD:
             hamiltonian: dict,
             physical_dim: int,
             virtual_dim: int = 2,
+            unit_cells: int = 1,
             hamiltonian_title: str = 'untitled'
     ):
         self.hamil = hamiltonian
@@ -49,6 +50,7 @@ class iTEBD:
         self.vir_dim = virtual_dim
         self.phy_vir_dim = self.phy_dim * self.vir_dim
         self.delta = 0  # trotter_delta
+        self.unit_cells = unit_cells
 
     def suzuki_trotter(
             self,
@@ -64,12 +66,9 @@ class iTEBD:
 
         return output
 
-    def initial_mps_nodes(
-            self,
-            unit_cells: int = 1
-    ) -> list:
+    def initial_mps_nodes(self) -> list:
         nodes = []
-        for i in range(0, unit_cells * 2):
+        for i in range(0, self.unit_cells * 2):
             gamma = np.random.rand(self.vir_dim, self.phy_dim, self.vir_dim)
             nodes.append(gamma / np.max(np.abs(gamma)))
             lambda_ = np.random.rand(self.vir_dim)
@@ -81,13 +80,11 @@ class iTEBD:
             self,
             mps_chain_cell: np.ndarray,
             trotter_tensor: list,
-            unit_cells_per_mps: int,
             odd_even_indexes: np.ndarray
     ) -> np.ndarray:
-        # odd_even_indexes = self.even_odd_index_generator(unit_cells_per_mps)
         tensor_chain = [0 for _ in range(6)]
         for i in range(2):
-            for uc in range(unit_cells_per_mps):
+            for uc in range(self.unit_cells):
                 steps = i % 2
 
                 pointer = odd_even_indexes[steps][uc]
@@ -323,29 +320,25 @@ class iTEBD:
             delta_start: float = 0.01,
             delta_end: float = 0.0001,
             accuracy: float = 1e-16,
-            unit_cells: int = 1
     ) -> np.ndarray:
 
         result = {
             'dist': np.inf,
             'energy': np.inf,
-            'mps': self.initial_mps_nodes(unit_cells)
+            'mps': self.initial_mps_nodes()
         }
 
         if iteration % domains != 0:
             iteration -= iteration % domains
 
-        logfile_prefix = int(time.time())
         iter_value = int(iteration / domains)
         for delta in np.linspace(delta_start, delta_end, domains):
             self.delta = delta
-            itebd_result = self.iTEBD_check_(
+            itebd_result = self.iTEBD(
                 result['mps'],
                 self.suzuki_trotter(delta),
                 iter_value,
-                logfile_prefix,
-                accuracy,
-                unit_cells
+                accuracy
             )
 
             if itebd_result['dist'] < result['dist']:
@@ -363,101 +356,10 @@ class iTEBD:
             mps_chain_cell: np.ndarray,
             trotter_tensor: list,
             iteration: int,
-            logfile_prefix: int,
-            accuracy: float = 1e-8
-    ) -> dict:
-
-        # >>>> initial parameters
-        tensor_chain = [0 for _ in range(6)]
-        expectation_diff = [0, 0]
-        sampling = int(iteration * 0.1)
-        expectation_energy_history = []
-        best_result = {
-            'dist': np.inf,
-            'energy': 0,
-            'mps': []
-        }
-        # <<<< initial parameters
-
-        prg = tqdm(range(sampling, iteration + sampling + 2), desc=f'iTEBD is running, delta = {self.delta:.5f}',
-                   leave=True)
-        for i in prg:
-            steps = i % 2
-
-            for j in range(5):
-                tensor_chain[j] = mps_chain_cell[self.MPS_NODE_INDICES[steps][j]]
-            tensor_chain[5] = trotter_tensor[steps]
-
-            tensor_contraction = ncon(tensor_chain, self.MPS_CONTRACT_LEGS_INDICES, None, self.MPS_CONTRACT_FINAL_ORDER)
-            # implode
-            implode = np.reshape(tensor_contraction, [self.phy_vir_dim, self.phy_vir_dim])
-
-            # SVD decomposition
-            svd_u, svd_sig, svd_v = np.linalg.svd(implode)
-
-            # SVD truncate
-            mps_chain_cell[self.MPS_NODE_INDICES[steps][1]] = np.reshape(
-                svd_u[:, :self.vir_dim],
-                [self.vir_dim, self.phy_dim, self.vir_dim]
-            )
-
-            mps_chain_cell[self.MPS_NODE_INDICES[steps][2]] = np.diag(
-                svd_sig[:self.vir_dim] / sum(svd_sig[:self.vir_dim])
-            )
-
-            mps_chain_cell[self.MPS_NODE_INDICES[steps][3]] = np.reshape(
-                svd_v[:self.vir_dim, :],
-                [self.vir_dim, self.phy_dim, self.vir_dim]
-            )
-
-            inverse_lr_nodes = 1 / np.diag(mps_chain_cell[self.MPS_NODE_INDICES[steps][4]])
-
-            mps_chain_cell[self.MPS_NODE_INDICES[steps][1]] = ncon(
-                [np.diag(inverse_lr_nodes), mps_chain_cell[self.MPS_NODE_INDICES[steps][1]]],
-                [[-1, 1], [1, -2, -3]])
-            mps_chain_cell[self.MPS_NODE_INDICES[steps][3]] = ncon(
-                [mps_chain_cell[self.MPS_NODE_INDICES[steps][3]], np.diag(inverse_lr_nodes)],
-                [[-1, -2, 1], [1, -3]])
-
-            if i % sampling == 0:
-                xpc_energy = self.expectation_energy(mps_chain_cell)
-                expectation_energy_history.append(xpc_energy)
-                expectation_diff[0] = xpc_energy
-                if len(expectation_energy_history) != 1:
-
-                    mean_ = np.mean(expectation_energy_history)
-                    if np.abs(xpc_energy - mean_) < best_result['dist']:
-                        prg.set_postfix_str(f'Best Energy: {xpc_energy:.16f}')
-                        prg.refresh()  # to show immediately the update
-                        best_result = {
-                            'dist': np.abs(xpc_energy - mean_),
-                            'energy': xpc_energy,
-                            'mps': mps_chain_cell
-                        }
-
-            if (i + 1) % sampling == 2:
-                expectation_diff[1] = self.expectation_energy(mps_chain_cell)
-                if np.abs(expectation_diff[0] - expectation_diff[1]) < accuracy:
-                    break
-
-        # logfile = f'mps_data/{logfile_prefix}_history_energy.csv'
-        # df = pd.DataFrame(expectation_energy_history)
-        # df.to_csv(logfile, mode='a', header=False, index=False)
-
-        return best_result  # mps_chain_cell
-
-    def iTEBD_check_(
-            self,
-            mps_chain_cell: np.ndarray,
-            trotter_tensor: list,
-            iteration: int,
-            logfile_prefix: int,
             accuracy: float = 1e-8,
-            unit_cells: int = 1
     ) -> dict:
 
         # >>>> initial parameters
-        # tensor_chain = [0 for _ in range(6)]
         expectation_diff = [0, 0]
         sampling = int(iteration * 0.1)
         expectation_energy_history = []
@@ -466,22 +368,22 @@ class iTEBD:
             'energy': 0,
             'mps': []
         }
+        odd_even_indexes = self.even_odd_index_generator()
         # <<<< initial parameters
 
         prg = tqdm(range(sampling, iteration + sampling + 2), desc=f'iTEBD is running, delta = {self.delta:.5f}',
                    leave=True)
-        odd_even_indexes = self.even_odd_index_generator(unit_cells)
+
         for i in prg:
 
             mps_chain_cell = self.cell_update(
                 mps_chain_cell,
                 trotter_tensor,
-                unit_cells,
                 odd_even_indexes
             )
 
             if i % sampling == 0:
-                if unit_cells == 2:
+                if self.unit_cells == 2:
                     xpc_energy = self.expectation_energy_two_cell(mps_chain_cell)
                 else:
                     xpc_energy = self.expectation_energy(mps_chain_cell)
@@ -495,13 +397,14 @@ class iTEBD:
                         prg.set_postfix_str(f'Best Energy: {xpc_energy:.16f}')
                         prg.refresh()  # to show immediately the update
                         best_result = {
+                            'mps': mps_chain_cell,
                             'dist': np.abs(xpc_energy - mean_),
                             'energy': xpc_energy,
-                            'mps': mps_chain_cell
+                            'energy_history': expectation_energy_history,
                         }
 
             if (i + 1) % sampling == 2:
-                if unit_cells == 2:
+                if self.unit_cells == 2:
                     expectation_diff[1] = self.expectation_energy_two_cell(mps_chain_cell)
                 else:
                     expectation_diff[1] = self.expectation_energy(mps_chain_cell)
@@ -509,11 +412,7 @@ class iTEBD:
                 if np.abs(expectation_diff[0] - expectation_diff[1]) < accuracy:
                     break
 
-        # logfile = f'mps_data/{logfile_prefix}_history_energy.csv'
-        # df = pd.DataFrame(expectation_energy_history)
-        # df.to_csv(logfile, mode='a', header=False, index=False)
-
-        return best_result  # mps_chain_cell
+        return best_result
 
     def save_data(
             self,
@@ -651,21 +550,18 @@ class iTEBD:
             'mps_chain': mps_chain_cell,
         }
 
-    def even_odd_index_generator(
-            self,
-            unit_cells_per_mps: int
-    ) -> np.ndarray:
-        len_mps = unit_cells_per_mps * 4
-        len_itebd_cell = int(len_mps / unit_cells_per_mps)
+    def even_odd_index_generator(self) -> np.ndarray:
+        len_mps = self.unit_cells * 4
+        len_itebd_cell = int(len_mps / self.unit_cells)
 
         indexes = [i % len_mps for i in range(len_mps - 1, len_mps * 2)]
         start_index = [0, 2]  # even, odd
-        start_index_itebd = [len_itebd_cell * i for i in range(unit_cells_per_mps)]
+        start_index_itebd = [len_itebd_cell * i for i in range(self.unit_cells)]
         index_divider = []
         for p in range(2):
-            for q in range(unit_cells_per_mps):
+            for q in range(self.unit_cells):
                 index = []
                 for j in range(len_itebd_cell + 1):
                     index.append(indexes[(start_index_itebd[q] + start_index[p] + j) % len_mps])
                 index_divider.append(index)
-        return np.reshape(index_divider, (2, unit_cells_per_mps, len_itebd_cell + 1))
+        return np.reshape(index_divider, (2, self.unit_cells, len_itebd_cell + 1))
