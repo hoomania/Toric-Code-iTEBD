@@ -54,22 +54,15 @@ class iTEBD:
             self,
             delta: float
     ) -> list:
-        # direct hamiltonian
-        hamil_shape = self.hamil['AB'].shape
-        reshape_dim = hamil_shape[0] * hamil_shape[1]
-        power = -delta * np.reshape(self.hamil['AB'], [reshape_dim, reshape_dim])
-        AB = expm(power).reshape(hamil_shape)
+        output = []
+        keys = ['AB', 'BA']
+        for key in keys:
+            hamil_shape = self.hamil[key].shape
+            reshape_dim = hamil_shape[0] * hamil_shape[1]
+            power = -delta * np.reshape(self.hamil[key], [reshape_dim, reshape_dim])
+            output.append(expm(power).reshape(hamil_shape))
 
-        # change side hamiltonian (reverse)
-        hamil_shape = self.hamil['BA'].shape
-        reshape_dim = hamil_shape[0] * hamil_shape[1]
-        power = -delta * np.reshape(self.hamil['BA'], [reshape_dim, reshape_dim])
-        BA = expm(power).reshape(hamil_shape)
-
-        return [
-            AB,
-            BA
-        ]
+        return output
 
     def initial_mps_nodes(
             self,
@@ -102,7 +95,8 @@ class iTEBD:
                     tensor_chain[j] = mps_chain_cell[pointer[j]]
                 tensor_chain[5] = trotter_tensor[steps]
 
-                tensor_contraction = ncon(tensor_chain, self.MPS_CONTRACT_LEGS_INDICES, None, self.MPS_CONTRACT_FINAL_ORDER)
+                tensor_contraction = ncon(tensor_chain, self.MPS_CONTRACT_LEGS_INDICES, None,
+                                          self.MPS_CONTRACT_FINAL_ORDER)
                 # implode
                 implode = np.reshape(tensor_contraction, [self.phy_vir_dim, self.phy_vir_dim])
 
