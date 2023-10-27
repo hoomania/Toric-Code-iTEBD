@@ -2,6 +2,7 @@ from ncon import ncon
 from scipy.linalg import expm
 from tqdm import tqdm
 import numpy as np
+import hamiltonian as hamil
 
 
 class iTEBD:
@@ -72,6 +73,8 @@ class iTEBD:
             [6, -4],
             [2, 5, -2, -3],
         ]
+        self.EXPECTATION_NORM_LEGS_INDICES = self.expectation_norm_legs_indices()
+        self.EXPECTATION_CONTRACT_LEGS_ONE_UNIT_CELL_INDICES = self.expectation_contract_legs_one_unit_cell_indices()
 
     def suzuki_trotter(
             self,
@@ -113,8 +116,6 @@ class iTEBD:
                     tensor_chain[j] = mps_chain_cell[pointer[j]]
                 tensor_chain[5] = trotter_tensor[steps]
 
-                # tensor_contraction = ncon(tensor_chain, self.MPS_CONTRACT_LEGS_INDICES, None,
-                #                           self.MPS_CONTRACT_FINAL_ORDER)
                 tensor_contraction = ncon(tensor_chain, self.MPS_CONTRACT_LEGS_INDICES)
                 # implode
                 implode = np.reshape(tensor_contraction, [self.phy_vir_dim, self.phy_vir_dim])
@@ -215,19 +216,87 @@ class iTEBD:
         indices_list.append([ppo, negative])
         return indices_list
 
-    def expectation_contract_legs_indices(self):
-        domain = (self.unit_cells * 2) + 2
-        first_row = [i + 1 for i in range(domain)]
-        diff = first_row[-1] - first_row[0]
-        last_row = [first_row[i] + diff for i in range(domain)]
-        last_row[0] = first_row[0]
-        last_row[-1] = first_row[-1]
-        indices_list = [first_row]
-        for i in range(self.unit_cells):
-            indices_list.append(
-                [first_row[(2 * i) + 1], first_row[(2 * i) + 2], last_row[(2 * i) + 1], last_row[(2 * i) + 2]])
+    def expectation_contract_legs_indices(self) -> list:
+        indices_list = []
+        positive = 1
+        for w in range(2):
+            for i in range(0, (self.unit_cells * 4) + 1):
+                if i % 2 == 0:
+                    indices_list.append([positive, positive + 1])
+                    positive += 1
+                else:
+                    indices_list.append([positive, positive + 1, positive + 2])
+                    positive += 2
 
-        indices_list.append(last_row)
+        indices_list[(self.unit_cells * 4) + 1][0] = indices_list[0][0]
+        indices_list[-1][-1] = indices_list[self.unit_cells * 4][-1]
+
+        j = (self.unit_cells * 4) + 1
+        for i in range(self.unit_cells):
+            t = 1 + (4 * i)
+            indices_list.append(
+                [
+                    indices_list[t][1],
+                    indices_list[t + 2][1],
+                    indices_list[t + j][1],
+                    indices_list[t + 2 + j][1],
+                ]
+            )
+
+        return indices_list
+
+    def expectation_contract_legs_one_unit_cell_indices(self) -> list:
+        indices_list = []
+        positive = 1
+        for w in range(2):
+            for i in range(0, (self.unit_cells * 4) + 1):
+                if i % 2 == 0:
+                    indices_list.append([positive, positive + 1])
+                    positive += 1
+                else:
+                    indices_list.append([positive, positive + 1, positive + 2])
+                    positive += 2
+
+        indices_list[(self.unit_cells * 4) + 1][0] = indices_list[0][0]
+        indices_list[-1][-1] = indices_list[self.unit_cells * 4][-1]
+
+        j = (self.unit_cells * 4) + 1
+        indices_list.append(
+            [
+                indices_list[1][1],
+                indices_list[3][1],
+                indices_list[1 + j][1],
+                indices_list[3 + j][1],
+            ]
+        )
+        for i in range(1, self.unit_cells):
+            t = 1 + (4 * i)
+            indices_list[t + j][1] = indices_list[t][1]
+            indices_list[t + j + 2][1] = indices_list[t + 2][1]
+
+        return indices_list
+
+    def expectation_norm_legs_indices(self) -> list:
+        indices_list = []
+        positive = 1
+        for w in range(2):
+            for i in range(0, (self.unit_cells * 4) + 1):
+                if i % 2 == 0:
+                    indices_list.append([positive, positive + 1])
+                    positive += 1
+                else:
+                    indices_list.append([positive, positive + 1, positive + 2])
+                    positive += 2
+
+        indices_list[(self.unit_cells * 4) + 1][0] = indices_list[0][0]
+        indices_list[-1][-1] = indices_list[self.unit_cells * 4][-1]
+
+        j = (self.unit_cells * 4) + 1
+        for i in range(self.unit_cells):
+            t = 1 + (4 * i)
+            indices_list[t + j][1] = indices_list[t][1]
+            indices_list[t + j + 2][1] = indices_list[t + 2][1]
+
         return indices_list
 
     def even_odd_index_generator(self) -> np.ndarray:
@@ -307,56 +376,71 @@ class iTEBD:
             mps_nodes: np.ndarray,
             operator: dict
     ) -> float:
-        tensor_chain = [0 for _ in range((self.unit_cells * 4) + 1)]
-        expectation_value = [0 for _ in range(2)]
+        expectation_value = [0, 0]
 
         direction = ['AB', 'BA']
         for i in range(2):
             steps = i % 2
+            tensor_chain = []
 
             for j in range((self.unit_cells * 4) + 1):
-                tensor_chain[j] = mps_nodes[self.MPS_NODE_INDICES[steps][j]]
+                tensor_chain.append(mps_nodes[self.MPS_NODE_INDICES[steps][j]])
 
-            contraction = ncon(tensor_chain, self.EXPECTATION_MPS_CONTRACT_LEG_INDICES)
+            for j in range((self.unit_cells * 4) + 1):
+                tensor_chain.append(np.conj(mps_nodes[self.MPS_NODE_INDICES[steps][j]]))
 
-            list_cell_hamil = [contraction]
+            norm = ncon(
+                tensor_chain,
+                self.EXPECTATION_NORM_LEGS_INDICES
+            )
+
             for w in range(self.unit_cells):
-                list_cell_hamil.append(operator[direction[steps]])
-            list_cell_hamil.append(np.conj(contraction))
+                tensor_chain.append(operator[direction[steps]])
 
             expectation_value[i] = ncon(
-                list_cell_hamil,
+                tensor_chain,
                 self.EXPECTATION_CONTRACT_LEGS_INDICES
-            )
-            norm = ncon(
-                [contraction, np.conj(contraction)],
-                [self.EXPECTATION_CONTRACT_LEGS_INDICES[0], self.EXPECTATION_CONTRACT_LEGS_INDICES[0]]
             )
 
             expectation_value[i] /= norm
 
         return sum(expectation_value)
 
-    def expectation_single_site(
+    def expectation_single_site_mag(
             self,
             mps_nodes: np.ndarray,
-            operator: dict
+            unit_cell_index: int,
+            site_index: int,
+            magnetization: str
     ) -> float:
-        tensor_chain = [0 for _ in range(5)]
+        if unit_cell_index != 1:
+            index = unit_cell_index - 1
+            mps_nodes = [mps_nodes[i % len(mps_nodes)] for i in range(4 * index, len(mps_nodes) + (4 * index))]
 
-        for j in range(5):
-            tensor_chain[j] = mps_nodes[self.MPS_NODE_INDICES[0][j]]
+        tensor_chain = []
+        for j in range((self.unit_cells * 4) + 1):
+            tensor_chain.append(mps_nodes[self.MPS_NODE_INDICES[0][j]])
 
-        contraction = ncon(tensor_chain, self.EXPECTATION_MPS_CONTRACT_LEG_INDICES)
-        expectation_value = ncon(
-            [contraction, operator['AB'], np.conj(contraction)],
-            self.EXPECTATION_CONTRACT_LEGS_INDICES
-        )
+        for j in range((self.unit_cells * 4) + 1):
+            tensor_chain.append(np.conj(mps_nodes[self.MPS_NODE_INDICES[0][j]]))
+
         norm = ncon(
-            [contraction, np.conj(contraction)],
-            [self.EXPECTATION_CONTRACT_LEGS_INDICES[0], self.EXPECTATION_CONTRACT_LEGS_INDICES[0]]
+            tensor_chain,
+            self.expectation_norm_legs_indices()
         )
 
-        expectation_value /= norm
+        str_len = int(2 * np.log2(self.phy_dim))
+        hamil_str = ''
+        for i in range(str_len):
+            if site_index - 1 == i:
+                hamil_str += magnetization
+            else:
+                hamil_str += 'i'
+        operator = hamil.Hamiltonian().encode_hamil([hamil_str])
+        tensor_chain.append(operator['AB'])
 
-        return sum(expectation_value)
+        return ncon(
+            tensor_chain,
+            self.EXPECTATION_CONTRACT_LEGS_ONE_UNIT_CELL_INDICES
+        ) / norm
+
