@@ -6,43 +6,6 @@ import hamiltonian as hamil
 
 
 class iTEBD:
-    # lambda_b, gamma_a, lambda_a, gamma_b, lambda_b
-    # MPS_NODE_INDICES = [
-    #     [3, 0, 1, 2, 3],
-    #     [1, 2, 3, 0, 1],
-    # ]
-    # # MPS_CONTRACT_LEGS_INDICES = [
-    # #     [-1, 1],
-    # #     [1, 2, 3],
-    # #     [3, 4],
-    # #     [4, 5, 6],
-    # #     [6, -2],
-    # #     [2, 5, -3, -4],
-    # # ]
-    #
-    # MPS_CONTRACT_LEGS_INDICES = [
-    #     [-1, 1],
-    #     [1, 2, 3],
-    #     [3, 4],
-    #     [4, 5, 6],
-    #     [6, -4],
-    #     [2, 5, -2, -3],
-    # ]
-    #
-    # # MPS_CONTRACT_FINAL_ORDER = [-1, -3, -4, -2]
-    #
-    # EXPECTATION_MPS_CONTRACT_LEG_INDICES = [
-    #     [-1, 1],
-    #     [1, -2, 2],
-    #     [2, 3],
-    #     [3, -3, 4],
-    #     [4, -4],
-    # ]
-    # EXPECTATION_CONTRACT_LEGS_INDICES = [
-    #     [1, 2, 3, 4],
-    #     [2, 3, 5, 6],
-    #     [1, 5, 6, 4]
-    # ]
 
     def __init__(
             self,
@@ -60,11 +23,13 @@ class iTEBD:
         self.delta = 0
         self.accuracy = 1e-16
 
-        self.mps_nodes = self.initial_mps_nodes()
+        self.mps_nodes = self.initial_mps()
 
-        self.MPS_NODE_INDICES = self.mps_node_indices()
+        self.MPS_NODE_INDICES = self.indices_mps_node()
         self.EXPECTATION_MPS_CONTRACT_LEG_INDICES = self.expectation_mps_contract_leg_indices()
         self.EXPECTATION_CONTRACT_LEGS_INDICES = self.expectation_contract_legs_indices()
+        self.EXPECTATION_NORM_LEGS_INDICES = self.expectation_norm_legs_indices()
+        self.EXPECTATION_CONTRACT_LEGS_ONE_UNIT_CELL_INDICES = self.expectation_contract_legs_one_unit_cell_indices()
         self.MPS_CONTRACT_LEGS_INDICES = [
             [-1, 1],
             [1, 2, 3],
@@ -73,8 +38,6 @@ class iTEBD:
             [6, -4],
             [2, 5, -2, -3],
         ]
-        self.EXPECTATION_NORM_LEGS_INDICES = self.expectation_norm_legs_indices()
-        self.EXPECTATION_CONTRACT_LEGS_ONE_UNIT_CELL_INDICES = self.expectation_contract_legs_one_unit_cell_indices()
 
     def suzuki_trotter(
             self,
@@ -90,7 +53,7 @@ class iTEBD:
 
         return output
 
-    def initial_mps_nodes(self) -> list:
+    def initial_mps(self) -> list:
         nodes = []
         for i in range(0, self.unit_cells * 2):
             gamma = np.random.rand(self.vir_dim, self.phy_dim, self.vir_dim)
@@ -104,17 +67,17 @@ class iTEBD:
             self,
             mps_chain_cell: np.ndarray,
             trotter_tensor: list,
-            odd_even_indexes: np.ndarray
+            indices_odd_even_bond: np.ndarray
     ) -> np.ndarray:
         tensor_chain = [0 for _ in range(6)]
         for i in range(2):
             for uc in range(self.unit_cells):
-                steps = i % 2
 
-                pointer = odd_even_indexes[steps][uc]
+                pointer = indices_odd_even_bond[i][uc]
+
                 for j in range(5):
                     tensor_chain[j] = mps_chain_cell[pointer[j]]
-                tensor_chain[5] = trotter_tensor[steps]
+                tensor_chain[5] = trotter_tensor[i]
 
                 tensor_contraction = ncon(tensor_chain, self.MPS_CONTRACT_LEGS_INDICES)
                 # implode
@@ -160,7 +123,7 @@ class iTEBD:
     ) -> np.ndarray:
 
         result = {
-            'mps': self.initial_mps_nodes(),
+            'mps': self.initial_mps(),
             # 'mps': self.mps_nodes,
             'dist': np.inf,
             'energy': np.inf,
@@ -191,7 +154,7 @@ class iTEBD:
 
         return result['mps']
 
-    def mps_node_indices(self):
+    def indices_mps_node(self):
         len_mps = self.unit_cells * 4
         indices = [
             [i % len_mps for i in range(len_mps - 1, len_mps * 2)],
@@ -299,7 +262,7 @@ class iTEBD:
 
         return indices_list
 
-    def even_odd_index_generator(self) -> np.ndarray:
+    def indices_even_odd_bond(self) -> np.ndarray:
         len_mps = self.unit_cells * 4
         indexes = [i % len_mps for i in range(len_mps - 1, len_mps * 2)]
         start_index = [0, 2]  # even, odd
@@ -331,7 +294,7 @@ class iTEBD:
             'energy': 0,
             'mps': []
         }
-        odd_even_indexes = self.even_odd_index_generator()
+        indices_odd_even = self.indices_even_odd_bond()
         # <<<< initial parameters
 
         prg = tqdm(range(sampling, iteration + sampling + 2), desc=f'delta= {self.delta:.5f}',
@@ -342,7 +305,7 @@ class iTEBD:
             mps_chain_cell = self.cell_update(
                 mps_chain_cell,
                 trotter_tensor,
-                odd_even_indexes
+                indices_odd_even
             )
 
             if i % sampling == 0:
