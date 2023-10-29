@@ -13,13 +13,15 @@ class iTEBD:
             physical_dim: int,
             virtual_dim: int = 2,
             unit_cells: int = 1,
+            matrix_type: str = 'pauli'
     ):
         self.hamil = hamiltonian
         self.phy_dim = physical_dim
         self.vir_dim = virtual_dim
-        self.phy_vir_dim = self.phy_dim * self.vir_dim
         self.unit_cells = unit_cells
+        self.matrix_type = matrix_type
 
+        self.phy_vir_dim = self.phy_dim * self.vir_dim
         self.delta = 0
         self.accuracy = 1e-16
 
@@ -412,7 +414,7 @@ class iTEBD:
                 hamil_str += magnetization
             else:
                 hamil_str += 'i'
-        operator = hamil.Hamiltonian().encode_hamil([hamil_str])
+        operator = hamil.Hamiltonian(matrix_type=self.matrix_type).encode_hamil([hamil_str])
         tensor_chain.append(operator['AB'])
 
         return ncon(
