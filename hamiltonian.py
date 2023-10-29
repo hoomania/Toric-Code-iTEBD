@@ -11,7 +11,6 @@ class Hamiltonian:
 
     def gate_generator(
             self,
-            # map_pattern: dict,
             atb: list,
             bta: list = [],
             matrix_type: str = 'pauli',
@@ -55,12 +54,13 @@ class Hamiltonian:
     def transverse_field_ising(
             self,
             j: float,
-            h: float
+            h: float,
+            matrix_type: str = 'pauli'
     ) -> dict:
 
         atb = ['zz', 'xi', 'ix']
         output = {'AB': None, 'BA': None}
-        blocks = self.gate_generator(atb)
+        blocks = self.gate_generator(atb, matrix_type=matrix_type)
 
         for i in ['AB', 'BA']:
             output[i] = 0.5 * -h * (blocks[i][1] + blocks[i][2]) - (j * blocks[i][0])

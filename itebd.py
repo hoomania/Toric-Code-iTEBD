@@ -339,35 +339,48 @@ class iTEBD:
             mps_nodes: np.ndarray,
             operator: dict
     ) -> float:
-        expectation_value = [0, 0]
+        expectation_value = []
 
         direction = ['AB', 'BA']
         for i in range(2):
-            steps = i % 2
-            tensor_chain = []
-
-            for j in range((self.unit_cells * 4) + 1):
-                tensor_chain.append(mps_nodes[self.MPS_NODE_INDICES[steps][j]])
-
-            for j in range((self.unit_cells * 4) + 1):
-                tensor_chain.append(np.conj(mps_nodes[self.MPS_NODE_INDICES[steps][j]]))
-
-            norm = ncon(
-                tensor_chain,
-                self.EXPECTATION_NORM_LEGS_INDICES
-            )
-
-            for w in range(self.unit_cells):
-                tensor_chain.append(operator[direction[steps]])
-
-            expectation_value[i] = ncon(
-                tensor_chain,
-                self.EXPECTATION_CONTRACT_LEGS_INDICES
-            )
-
-            expectation_value[i] /= norm
+            for j in range(self.unit_cells):
+                expectation_value.append(
+                    self.expectation_bond(
+                        mps_nodes,
+                        operator[direction[i]],
+                        (2 * j) + (i + 1)
+                    )
+                )
 
         return sum(expectation_value)
+
+    def expectation_bond(
+            self,
+            mps_nodes: np.ndarray,
+            operator: dict,
+            bond_index: int,
+    ) -> float:
+        index = bond_index - 1
+        mps_nodes = [mps_nodes[i % len(mps_nodes)] for i in range(4 * index, len(mps_nodes) + (4 * index))]
+
+        tensor_chain = []
+        for j in range((self.unit_cells * 4) + 1):
+            tensor_chain.append(mps_nodes[self.MPS_NODE_INDICES[0][j]])
+
+        for j in range((self.unit_cells * 4) + 1):
+            tensor_chain.append(np.conj(mps_nodes[self.MPS_NODE_INDICES[0][j]]))
+
+        norm = ncon(
+            tensor_chain,
+            self.expectation_norm_legs_indices()
+        )
+
+        tensor_chain.append(operator)
+
+        return ncon(
+            tensor_chain,
+            self.EXPECTATION_CONTRACT_LEGS_ONE_UNIT_CELL_INDICES
+        ) / norm
 
     def expectation_single_site_mag(
             self,
@@ -406,4 +419,3 @@ class iTEBD:
             tensor_chain,
             self.EXPECTATION_CONTRACT_LEGS_ONE_UNIT_CELL_INDICES
         ) / norm
-
