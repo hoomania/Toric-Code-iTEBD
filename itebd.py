@@ -12,20 +12,18 @@ class iTEBD:
             hamiltonian: dict,
             physical_dim: int,
             virtual_dim: int = 2,
-            unit_cells: int = 1,
-            matrix_type: str = 'pauli'
+            unit_cells: int = 1
     ):
         self.hamil = hamiltonian
         self.phy_dim = physical_dim
         self.vir_dim = virtual_dim
         self.unit_cells = unit_cells
-        self.matrix_type = matrix_type
+        self.matrix_type = hamiltonian['matrix_type']
 
+        self.mps = self.initial_mps()
         self.phy_vir_dim = self.phy_dim * self.vir_dim
         self.delta = 0
         self.accuracy = 1e-16
-
-        self.mps_nodes = self.initial_mps()
 
         self.MPS_NODE_INDICES = self.indices_mps_node()
         self.EXPECTATION_MPS_CONTRACT_LEG_INDICES = self.expectation_mps_contract_leg_indices()
@@ -40,121 +38,7 @@ class iTEBD:
             [6, -4],
             [2, 5, -2, -3],
         ]
-
-    def suzuki_trotter(
-            self,
-            delta: float
-    ) -> list:
-        output = []
-        keys = ['AB', 'BA']
-        for key in keys:
-            hamil_shape = self.hamil[key].shape
-            reshape_dim = hamil_shape[0] * hamil_shape[1]
-            power = -delta * np.reshape(self.hamil[key], [reshape_dim, reshape_dim])
-            output.append(expm(power).reshape(hamil_shape))
-
-        return output
-
-    def initial_mps(self) -> list:
-        nodes = []
-        for i in range(0, self.unit_cells * 2):
-            gamma = np.random.rand(self.vir_dim, self.phy_dim, self.vir_dim)
-            nodes.append(gamma / np.max(np.abs(gamma)))
-            lambda_ = np.random.rand(self.vir_dim)
-            nodes.append(np.diag(lambda_ / sum(lambda_)))
-
-        return nodes
-
-    def cell_update(
-            self,
-            mps_chain_cell: np.ndarray,
-            trotter_tensor: list,
-            indices_odd_even_bond: np.ndarray
-    ) -> np.ndarray:
-        tensor_chain = [0 for _ in range(6)]
-        for i in range(2):
-            for uc in range(self.unit_cells):
-
-                pointer = indices_odd_even_bond[i][uc]
-
-                for j in range(5):
-                    tensor_chain[j] = mps_chain_cell[pointer[j]]
-                tensor_chain[5] = trotter_tensor[i]
-
-                tensor_contraction = ncon(tensor_chain, self.MPS_CONTRACT_LEGS_INDICES)
-                # implode
-                implode = np.reshape(tensor_contraction, [self.phy_vir_dim, self.phy_vir_dim])
-
-                # SVD decomposition
-                svd_u, svd_sig, svd_v = np.linalg.svd(implode)
-
-                # SVD truncate
-                mps_chain_cell[pointer[1]] = np.reshape(
-                    svd_u[:, :self.vir_dim],
-                    [self.vir_dim, self.phy_dim, self.vir_dim]
-                )
-
-                mps_chain_cell[pointer[2]] = np.diag(
-                    svd_sig[:self.vir_dim] / sum(svd_sig[:self.vir_dim])
-                )
-
-                mps_chain_cell[pointer[3]] = np.reshape(
-                    svd_v[:self.vir_dim, :],
-                    [self.vir_dim, self.phy_dim, self.vir_dim]
-                )
-
-                inverse_l_nodes = 1 / np.diag(mps_chain_cell[pointer[0]])
-                inverse_r_nodes = 1 / np.diag(mps_chain_cell[pointer[4]])
-
-                mps_chain_cell[pointer[1]] = ncon(
-                    [np.diag(inverse_l_nodes), mps_chain_cell[pointer[1]]],
-                    [[-1, 1], [1, -2, -3]])
-                mps_chain_cell[pointer[3]] = ncon(
-                    [mps_chain_cell[pointer[3]], np.diag(inverse_r_nodes)],
-                    [[-1, -2, 1], [1, -3]])
-
-        return mps_chain_cell
-
-    def delta_manager(
-            self,
-            iteration: int,
-            domains: int,
-            delta_start: float = 0.01,
-            delta_end: float = 0.0001,
-            accuracy: float = 1e-16,
-    ) -> np.ndarray:
-
-        result = {
-            'mps': self.initial_mps(),
-            # 'mps': self.mps_nodes,
-            'dist': np.inf,
-            'energy': np.inf,
-        }
-
-        if iteration % domains != 0:
-            iteration -= iteration % domains
-
-        iter_value = int(iteration / domains)
-
-        print(f'iTEBD is running on physical dim={self.phy_dim} and virtual dim={self.vir_dim}')
-        for delta in np.linspace(delta_start, delta_end, domains):
-            self.delta = delta
-            self.accuracy = accuracy
-            evo_result = self.evolution(
-                result['mps'],
-                self.suzuki_trotter(delta),
-                iter_value
-            )
-
-            if evo_result['dist'] < result['dist']:
-                result = {
-                    'mps': evo_result['mps'],
-                    'dist': evo_result['dist'],
-                    'energy': evo_result['energy'],
-                    'energy_history': evo_result['energy_history']
-                }
-
-        return result['mps']
+        self.INDICES_EVEN_ODD_BOND = self.indices_even_odd_bond()
 
     def indices_mps_node(self):
         len_mps = self.unit_cells * 4
@@ -280,6 +164,71 @@ class iTEBD:
 
         return np.reshape(index_divider, (2, self.unit_cells, 5))
 
+    def initial_mps(self) -> list:
+        nodes = []
+        for i in range(0, self.unit_cells * 2):
+            gamma = np.random.rand(self.vir_dim, self.phy_dim, self.vir_dim)
+            nodes.append(gamma / np.max(np.abs(gamma)))
+            lambda_ = np.random.rand(self.vir_dim)
+            nodes.append(np.diag(lambda_ / sum(lambda_)))
+
+        return nodes
+
+    def suzuki_trotter(
+            self,
+            delta: float
+    ) -> list:
+        output = []
+        keys = ['AB', 'BA']
+        for key in keys:
+            hamil_shape = self.hamil[key].shape
+            reshape_dim = hamil_shape[0] * hamil_shape[1]
+            power = -delta * np.reshape(self.hamil[key], [reshape_dim, reshape_dim])
+            output.append(expm(power).reshape(hamil_shape))
+
+        return output
+
+    def delta_manager(
+            self,
+            iteration: int,
+            domains: int,
+            delta_start: float = 0.01,
+            delta_end: float = 0.0001,
+            accuracy: float = 1e-16,
+    ) -> np.ndarray:
+
+        result = {
+            'mps': self.initial_mps(),
+            # 'mps': self.mps_nodes,
+            'dist': np.inf,
+            'energy': np.inf,
+        }
+
+        if iteration % domains != 0:
+            iteration -= iteration % domains
+
+        iter_value = int(iteration / domains)
+
+        print(f'iTEBD is running on physical dim={self.phy_dim} and virtual dim={self.vir_dim}')
+        for self.delta in np.linspace(delta_start, delta_end, domains):
+            # self.delta = delta
+            self.accuracy = accuracy
+            evo_result = self.evolution(
+                result['mps'],
+                self.suzuki_trotter(self.delta),
+                iter_value
+            )
+
+            if evo_result['dist'] < result['dist']:
+                result = {
+                    'mps': evo_result['mps'],
+                    'dist': evo_result['dist'],
+                    'energy': evo_result['energy'],
+                    'energy_history': evo_result['energy_history']
+                }
+
+        return result['mps']
+
     def evolution(
             self,
             mps_chain_cell: np.ndarray,
@@ -296,7 +245,6 @@ class iTEBD:
             'energy': 0,
             'mps': []
         }
-        indices_odd_even = self.indices_even_odd_bond()
         # <<<< initial parameters
 
         prg = tqdm(range(sampling, iteration + sampling + 2), desc=f'delta= {self.delta:.5f}',
@@ -307,7 +255,6 @@ class iTEBD:
             mps_chain_cell = self.cell_update(
                 mps_chain_cell,
                 trotter_tensor,
-                indices_odd_even
             )
 
             if i % sampling == 0:
@@ -335,6 +282,55 @@ class iTEBD:
                     break
 
         return best_result
+
+    def cell_update(
+            self,
+            mps_chain_cell: np.ndarray,
+            trotter_tensor: list,
+    ) -> np.ndarray:
+        tensor_chain = [0 for _ in range(6)]
+        for i in range(2):
+            for uc in range(self.unit_cells):
+
+                pointer = self.INDICES_EVEN_ODD_BOND[i][uc]
+
+                for j in range(5):
+                    tensor_chain[j] = mps_chain_cell[pointer[j]]
+                tensor_chain[5] = trotter_tensor[i]
+
+                tensor_contraction = ncon(tensor_chain, self.MPS_CONTRACT_LEGS_INDICES)
+                # implode
+                implode = np.reshape(tensor_contraction, [self.phy_vir_dim, self.phy_vir_dim])
+
+                # SVD decomposition
+                svd_u, svd_sig, svd_v = np.linalg.svd(implode)
+
+                # SVD truncate
+                mps_chain_cell[pointer[1]] = np.reshape(
+                    svd_u[:, :self.vir_dim],
+                    [self.vir_dim, self.phy_dim, self.vir_dim]
+                )
+
+                mps_chain_cell[pointer[2]] = np.diag(
+                    svd_sig[:self.vir_dim] / sum(svd_sig[:self.vir_dim])
+                )
+
+                mps_chain_cell[pointer[3]] = np.reshape(
+                    svd_v[:self.vir_dim, :],
+                    [self.vir_dim, self.phy_dim, self.vir_dim]
+                )
+
+                inverse_l_nodes = 1 / np.diag(mps_chain_cell[pointer[0]])
+                inverse_r_nodes = 1 / np.diag(mps_chain_cell[pointer[4]])
+
+                mps_chain_cell[pointer[1]] = ncon(
+                    [np.diag(inverse_l_nodes), mps_chain_cell[pointer[1]]],
+                    [[-1, 1], [1, -2, -3]])
+                mps_chain_cell[pointer[3]] = ncon(
+                    [mps_chain_cell[pointer[3]], np.diag(inverse_r_nodes)],
+                    [[-1, -2, 1], [1, -3]])
+
+        return mps_chain_cell
 
     def expectation_value(
             self,

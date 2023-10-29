@@ -8,7 +8,7 @@ class Hamiltonian:
             matrix_type: str = 'pauli'
     ):
         opr_obj = opr.Operator()
-        self.hamil_dict = {'AB': None, 'BA': None}
+        self.hamil_dict = {'AB': None, 'BA': None, 'matrix_type': matrix_type}
         if matrix_type == 'pauli':
             self.dictionary = opr_obj.pauli_dictionary()
         else:
