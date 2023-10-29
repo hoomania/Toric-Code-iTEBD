@@ -195,11 +195,9 @@ class iTEBD:
             delta_start: float = 0.01,
             delta_end: float = 0.0001,
             accuracy: float = 1e-16,
-    ) -> np.ndarray:
+    ) -> list:
 
         result = {
-            'mps': self.initial_mps(),
-            # 'mps': self.mps_nodes,
             'dist': np.inf,
             'energy': np.inf,
         }
@@ -209,29 +207,26 @@ class iTEBD:
 
         iter_value = int(iteration / domains)
 
-        print(f'iTEBD is running on physical dim={self.phy_dim} and virtual dim={self.vir_dim}')
+        print(f'iTEBD is running... \nPhysical Dim: {self.phy_dim} \nBond Dim: {self.vir_dim}')
         for self.delta in np.linspace(delta_start, delta_end, domains):
-            # self.delta = delta
             self.accuracy = accuracy
             evo_result = self.evolution(
-                result['mps'],
                 self.suzuki_trotter(self.delta),
                 iter_value
             )
 
             if evo_result['dist'] < result['dist']:
                 result = {
-                    'mps': evo_result['mps'],
                     'dist': evo_result['dist'],
                     'energy': evo_result['energy'],
                     'energy_history': evo_result['energy_history']
                 }
 
-        return result['mps']
+        # return result['mps']
+        return self.mps
 
     def evolution(
             self,
-            mps_chain_cell: np.ndarray,
             trotter_tensor: list,
             iteration: int
     ) -> dict:
@@ -243,7 +238,6 @@ class iTEBD:
         best_result = {
             'dist': np.inf,
             'energy': 0,
-            'mps': []
         }
         # <<<< initial parameters
 
@@ -252,13 +246,12 @@ class iTEBD:
 
         for i in prg:
 
-            mps_chain_cell = self.cell_update(
-                mps_chain_cell,
+            self.mps = self.cell_update(
                 trotter_tensor,
             )
 
             if i % sampling == 0:
-                xpc_energy = self.expectation_value(mps_chain_cell, self.hamil)
+                xpc_energy = self.expectation_value(self.hamil)
 
                 expectation_energy_history.append(xpc_energy)
                 expectation_diff[0] = xpc_energy
@@ -269,14 +262,13 @@ class iTEBD:
                         prg.set_postfix_str(f'Best Energy: {xpc_energy:.16f}')
                         prg.refresh()  # to show immediately the update
                         best_result = {
-                            'mps': mps_chain_cell,
                             'dist': np.abs(xpc_energy - mean_),
                             'energy': xpc_energy,
                             'energy_history': expectation_energy_history,
                         }
 
             if (i + 1) % sampling == 2:
-                expectation_diff[1] = self.expectation_value(mps_chain_cell, self.hamil)
+                expectation_diff[1] = self.expectation_value(self.hamil)
 
                 if np.abs(expectation_diff[0] - expectation_diff[1]) < self.accuracy:
                     break
@@ -285,9 +277,8 @@ class iTEBD:
 
     def cell_update(
             self,
-            mps_chain_cell: np.ndarray,
             trotter_tensor: list,
-    ) -> np.ndarray:
+    ) -> list:
         tensor_chain = [0 for _ in range(6)]
         for i in range(2):
             for uc in range(self.unit_cells):
@@ -295,7 +286,7 @@ class iTEBD:
                 pointer = self.INDICES_EVEN_ODD_BOND[i][uc]
 
                 for j in range(5):
-                    tensor_chain[j] = mps_chain_cell[pointer[j]]
+                    tensor_chain[j] = self.mps[pointer[j]]
                 tensor_chain[5] = trotter_tensor[i]
 
                 tensor_contraction = ncon(tensor_chain, self.MPS_CONTRACT_LEGS_INDICES)
@@ -306,35 +297,34 @@ class iTEBD:
                 svd_u, svd_sig, svd_v = np.linalg.svd(implode)
 
                 # SVD truncate
-                mps_chain_cell[pointer[1]] = np.reshape(
+                self.mps[pointer[1]] = np.reshape(
                     svd_u[:, :self.vir_dim],
                     [self.vir_dim, self.phy_dim, self.vir_dim]
                 )
 
-                mps_chain_cell[pointer[2]] = np.diag(
+                self.mps[pointer[2]] = np.diag(
                     svd_sig[:self.vir_dim] / sum(svd_sig[:self.vir_dim])
                 )
 
-                mps_chain_cell[pointer[3]] = np.reshape(
+                self.mps[pointer[3]] = np.reshape(
                     svd_v[:self.vir_dim, :],
                     [self.vir_dim, self.phy_dim, self.vir_dim]
                 )
 
-                inverse_l_nodes = 1 / np.diag(mps_chain_cell[pointer[0]])
-                inverse_r_nodes = 1 / np.diag(mps_chain_cell[pointer[4]])
+                inverse_l_nodes = 1 / np.diag(self.mps[pointer[0]])
+                inverse_r_nodes = 1 / np.diag(self.mps[pointer[4]])
 
-                mps_chain_cell[pointer[1]] = ncon(
-                    [np.diag(inverse_l_nodes), mps_chain_cell[pointer[1]]],
+                self.mps[pointer[1]] = ncon(
+                    [np.diag(inverse_l_nodes), self.mps[pointer[1]]],
                     [[-1, 1], [1, -2, -3]])
-                mps_chain_cell[pointer[3]] = ncon(
-                    [mps_chain_cell[pointer[3]], np.diag(inverse_r_nodes)],
+                self.mps[pointer[3]] = ncon(
+                    [self.mps[pointer[3]], np.diag(inverse_r_nodes)],
                     [[-1, -2, 1], [1, -3]])
 
-        return mps_chain_cell
+        return self.mps
 
     def expectation_value(
             self,
-            mps_nodes: np.ndarray,
             operator: dict
     ) -> float:
         expectation_value = []
@@ -344,7 +334,7 @@ class iTEBD:
             for j in range(self.unit_cells):
                 expectation_value.append(
                     self.expectation_bond(
-                        mps_nodes,
+                        self.mps,
                         operator[direction[i]],
                         (2 * j) + (i + 1)
                     )
@@ -354,7 +344,7 @@ class iTEBD:
 
     def expectation_bond(
             self,
-            mps_nodes: np.ndarray,
+            mps_nodes: list,
             operator: dict,
             bond_index: int,
     ) -> float:
@@ -382,7 +372,7 @@ class iTEBD:
 
     def expectation_single_site_mag(
             self,
-            mps_nodes: np.ndarray,
+            mps_nodes: list,
             unit_cell_index: int,
             site_index: int,
             magnetization: str
