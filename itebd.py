@@ -197,48 +197,32 @@ class iTEBD:
             accuracy: float = 1e-16,
     ) -> list:
 
-        result = {
-            'dist': np.inf,
-            'energy': np.inf,
-        }
-
         if iteration % domains != 0:
             iteration -= iteration % domains
 
         iter_value = int(iteration / domains)
+        self.accuracy = accuracy
 
         print(f'iTEBD is running... \nPhysical Dim: {self.phy_dim} \nBond Dim: {self.vir_dim}')
         for self.delta in np.linspace(delta_start, delta_end, domains):
-            self.accuracy = accuracy
-            evo_result = self.evolution(
+            self.evolution(
                 self.suzuki_trotter(self.delta),
                 iter_value
             )
 
-            if evo_result['dist'] < result['dist']:
-                result = {
-                    'dist': evo_result['dist'],
-                    'energy': evo_result['energy'],
-                    'energy_history': evo_result['energy_history']
-                }
-
-        # return result['mps']
         return self.mps
 
     def evolution(
             self,
             trotter_tensor: list,
             iteration: int
-    ) -> dict:
+    ) -> None:
 
         # >>>> initial parameters
-        expectation_diff = [0, 0]
         sampling = int(iteration * 0.1)
+        expectation_diff = [0, 0]
         expectation_energy_history = []
-        best_result = {
-            'dist': np.inf,
-            'energy': 0,
-        }
+        best_distance = np.inf
         # <<<< initial parameters
 
         prg = tqdm(range(sampling, iteration + sampling + 2), desc=f'delta= {self.delta:.5f}',
@@ -246,9 +230,7 @@ class iTEBD:
 
         for i in prg:
 
-            self.mps = self.cell_update(
-                trotter_tensor,
-            )
+            self.mps = self.cell_update(trotter_tensor)
 
             if i % sampling == 0:
                 xpc_energy = self.expectation_value(self.hamil)
@@ -257,23 +239,17 @@ class iTEBD:
                 expectation_diff[0] = xpc_energy
                 if len(expectation_energy_history) != 1:
 
-                    mean_ = np.mean(expectation_energy_history)
-                    if np.abs(xpc_energy - mean_) < best_result['dist']:
+                    mean_energy = np.mean(expectation_energy_history)
+                    if np.abs(xpc_energy - mean_energy) < best_distance:
                         prg.set_postfix_str(f'Best Energy: {xpc_energy:.16f}')
                         prg.refresh()  # to show immediately the update
-                        best_result = {
-                            'dist': np.abs(xpc_energy - mean_),
-                            'energy': xpc_energy,
-                            'energy_history': expectation_energy_history,
-                        }
+                        best_distance = np.abs(xpc_energy - mean_energy)
 
             if (i + 1) % sampling == 2:
                 expectation_diff[1] = self.expectation_value(self.hamil)
 
                 if np.abs(expectation_diff[0] - expectation_diff[1]) < self.accuracy:
                     break
-
-        return best_result
 
     def cell_update(
             self,
