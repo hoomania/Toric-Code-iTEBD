@@ -1,8 +1,9 @@
+from iTEBD import hamiltonian as hamil
 from ncon import ncon
 from scipy.linalg import expm
 from tqdm import tqdm
 import numpy as np
-import hamiltonian as hamil
+import re
 
 
 class iTEBD:
@@ -191,20 +192,20 @@ class iTEBD:
     def delta_manager(
             self,
             iteration: int,
-            domains: int,
+            delta_steps: int,
             delta_start: float = 0.01,
             delta_end: float = 0.0001,
             accuracy: float = 1e-16,
     ) -> list:
 
-        if iteration % domains != 0:
-            iteration -= iteration % domains
+        if iteration % delta_steps != 0:
+            iteration -= iteration % delta_steps
 
-        iter_value = int(iteration / domains)
+        iter_value = int(iteration / delta_steps)
         self.accuracy = accuracy
 
         print(f'iTEBD is running... \nPhysical Dim: {self.phy_dim} \nBond Dim: {self.vir_dim}')
-        for self.delta in np.linspace(delta_start, delta_end, domains):
+        for self.delta in np.linspace(delta_start, delta_end, delta_steps):
             self.evolution(
                 self.suzuki_trotter(self.delta),
                 iter_value
@@ -233,7 +234,7 @@ class iTEBD:
             self.mps = self.cell_update(trotter_tensor)
 
             if i % sampling == 0:
-                xpc_energy = self.expectation_value(self.hamil)
+                xpc_energy = sum(self.mps_bonds_energy(self.mps, self.hamil))
 
                 expectation_energy_history.append(xpc_energy)
                 expectation_diff[0] = xpc_energy
@@ -246,7 +247,7 @@ class iTEBD:
                         best_distance = np.abs(xpc_energy - mean_energy)
 
             if (i + 1) % sampling == 2:
-                expectation_diff[1] = self.expectation_value(self.hamil)
+                expectation_diff[1] = sum(self.mps_bonds_energy(self.mps, self.hamil))
 
                 if np.abs(expectation_diff[0] - expectation_diff[1]) < self.accuracy:
                     break
@@ -299,10 +300,11 @@ class iTEBD:
 
         return self.mps
 
-    def expectation_value(
+    def mps_bonds_energy(
             self,
+            mps: list,
             operator: dict
-    ) -> float:
+    ) -> list:
         expectation_value = []
 
         direction = ['AB', 'BA']
@@ -310,29 +312,30 @@ class iTEBD:
             for j in range(self.unit_cells):
                 expectation_value.append(
                     self.expectation_bond(
-                        self.mps,
+                        mps,
                         operator[direction[i]],
                         (2 * j) + (i + 1)
                     )
                 )
 
-        return sum(expectation_value)
+        # return sum(expectation_value)
+        return expectation_value
 
     def expectation_bond(
             self,
-            mps_nodes: list,
+            mps: list,
             operator: dict,
             bond_index: int,
     ) -> float:
         index = bond_index - 1
-        mps_nodes = [mps_nodes[i % len(mps_nodes)] for i in range(4 * index, len(mps_nodes) + (4 * index))]
+        mps = [mps[i % len(mps)] for i in range(4 * index, len(mps) + (4 * index))]
 
         tensor_chain = []
         for j in range((self.unit_cells * 4) + 1):
-            tensor_chain.append(mps_nodes[self.MPS_NODE_INDICES[0][j]])
+            tensor_chain.append(mps[self.MPS_NODE_INDICES[0][j]])
 
         for j in range((self.unit_cells * 4) + 1):
-            tensor_chain.append(np.conj(mps_nodes[self.MPS_NODE_INDICES[0][j]]))
+            tensor_chain.append(np.conj(mps[self.MPS_NODE_INDICES[0][j]]))
 
         norm = ncon(
             tensor_chain,
@@ -348,21 +351,21 @@ class iTEBD:
 
     def expectation_single_site_mag(
             self,
-            mps_nodes: list,
+            mps: list,
             unit_cell_index: int,
             site_index: int,
             magnetization: str
     ) -> float:
         if unit_cell_index != 1:
             index = unit_cell_index - 1
-            mps_nodes = [mps_nodes[i % len(mps_nodes)] for i in range(4 * index, len(mps_nodes) + (4 * index))]
+            mps = [mps[i % len(mps)] for i in range(4 * index, len(mps) + (4 * index))]
 
         tensor_chain = []
         for j in range((self.unit_cells * 4) + 1):
-            tensor_chain.append(mps_nodes[self.MPS_NODE_INDICES[0][j]])
+            tensor_chain.append(mps[self.MPS_NODE_INDICES[0][j]])
 
         for j in range((self.unit_cells * 4) + 1):
-            tensor_chain.append(np.conj(mps_nodes[self.MPS_NODE_INDICES[0][j]]))
+            tensor_chain.append(np.conj(mps[self.MPS_NODE_INDICES[0][j]]))
 
         norm = ncon(
             tensor_chain,
@@ -383,3 +386,37 @@ class iTEBD:
             tensor_chain,
             self.EXPECTATION_CONTRACT_LEGS_ONE_UNIT_CELL_INDICES
         ) / norm
+
+    def expectation_all_sites_mag(
+            self,
+            mps: list,
+            mag_direction: str = 'xyz'
+    ) -> dict:
+        mags = np.unique(re.findall('[xyz]', mag_direction))
+        sites = int(2 * np.log2(self.phy_dim))
+
+        mag_dict = {
+            'x': [],
+            'y': [],
+            'z': [],
+            'mean_x': 0,
+            'mean_y': 0,
+            'mean_z': 0,
+            'mag_value': 0
+        }
+
+        for mag in mags:
+            for unit_cell in range(self.unit_cells):
+                for site in range(1, sites + 1):
+                    mag_dict[mag].append(self.expectation_single_site_mag(
+                        mps,
+                        unit_cell,
+                        site,
+                        mag
+                    ))
+
+            mag_dict[f'mean_{mag}'] = np.mean(mag_dict[mag])
+
+        mag_dict['mag_value'] = np.sqrt(mag_dict['mean_x']**2 + mag_dict['mean_y']**2 + mag_dict['mean_z']**2)
+
+        return mag_dict

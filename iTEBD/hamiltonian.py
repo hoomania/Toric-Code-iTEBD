@@ -1,5 +1,5 @@
 from ncon import ncon
-import operators as opr
+from iTEBD import operators as opr
 
 
 class Hamiltonian:
@@ -51,6 +51,20 @@ class Hamiltonian:
                     )
 
         return output_blocks
+
+    def encode_hamil(
+            self,
+            atb: list,
+            bta=None,
+    ):
+        if bta is None:
+            bta = []
+        blocks = self.gate_generator(atb, bta)
+
+        for i in ['AB', 'BA']:
+            self.hamil_dict[i] = blocks[i][0]
+
+        return self.hamil_dict
 
     def transverse_field_ising(
             self,
@@ -127,20 +141,6 @@ class Hamiltonian:
             self.hamil_dict[i] = -av * (blocks[i][0] + blocks[i][2]) - (bp * blocks[i][1]) - (
                     hx * (blocks[i][3] + blocks[i][4] + blocks[i][5])) - (
                                 hz * (blocks[i][6] + blocks[i][7] + blocks[i][8]))
-
-        return self.hamil_dict
-
-    def encode_hamil(
-            self,
-            atb: list,
-            bta=None,
-    ):
-        if bta is None:
-            bta = []
-        blocks = self.gate_generator(atb, bta)
-
-        for i in ['AB', 'BA']:
-            self.hamil_dict[i] = blocks[i][0]
 
         return self.hamil_dict
 
