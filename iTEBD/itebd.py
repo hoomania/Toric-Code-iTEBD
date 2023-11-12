@@ -26,11 +26,6 @@ class iTEBD:
         self.delta = 0
         self.accuracy = 1e-16
 
-        self.MPS_NODE_INDICES = self.indices_mps_node()
-        self.EXPECTATION_MPS_CONTRACT_LEG_INDICES = self.expectation_mps_contract_leg_indices()
-        self.EXPECTATION_CONTRACT_LEGS_INDICES = self.expectation_contract_legs_indices()
-        self.EXPECTATION_NORM_LEGS_INDICES = self.expectation_norm_legs_indices()
-        self.EXPECTATION_CONTRACT_LEGS_ONE_UNIT_CELL_INDICES = self.expectation_contract_legs_one_unit_cell_indices()
         self.MPS_CONTRACT_LEGS_INDICES = [
             [-1, 1],
             [1, 2, 3],
@@ -40,114 +35,6 @@ class iTEBD:
             [2, 5, -2, -3],
         ]
         self.INDICES_EVEN_ODD_BOND = self.indices_even_odd_bond()
-
-    def indices_mps_node(self):
-        len_mps = self.unit_cells * 4
-        indices = [
-            [i % len_mps for i in range(len_mps - 1, len_mps * 2)],
-            [i % len_mps for i in range(1, len_mps + 2)],
-        ]
-        return indices
-
-    def expectation_mps_contract_leg_indices(self):
-        indices_list = [[-1, 1]]
-        positive = 1
-        ppo = 0
-        negative = -2
-        for i in range(1, self.unit_cells * 4):
-            if i % 2 == 1:
-                ppo = positive + 1
-                indices_list.append([positive, negative, ppo])
-                positive += 2
-                negative -= 1
-            else:
-                indices_list.append([ppo, positive])
-
-        indices_list.append([ppo, negative])
-        return indices_list
-
-    def expectation_contract_legs_indices(self) -> list:
-        indices_list = []
-        positive = 1
-        for w in range(2):
-            for i in range(0, (self.unit_cells * 4) + 1):
-                if i % 2 == 0:
-                    indices_list.append([positive, positive + 1])
-                    positive += 1
-                else:
-                    indices_list.append([positive, positive + 1, positive + 2])
-                    positive += 2
-
-        indices_list[(self.unit_cells * 4) + 1][0] = indices_list[0][0]
-        indices_list[-1][-1] = indices_list[self.unit_cells * 4][-1]
-
-        j = (self.unit_cells * 4) + 1
-        for i in range(self.unit_cells):
-            t = 1 + (4 * i)
-            indices_list.append(
-                [
-                    indices_list[t][1],
-                    indices_list[t + 2][1],
-                    indices_list[t + j][1],
-                    indices_list[t + 2 + j][1],
-                ]
-            )
-
-        return indices_list
-
-    def expectation_contract_legs_one_unit_cell_indices(self) -> list:
-        indices_list = []
-        positive = 1
-        for w in range(2):
-            for i in range(0, (self.unit_cells * 4) + 1):
-                if i % 2 == 0:
-                    indices_list.append([positive, positive + 1])
-                    positive += 1
-                else:
-                    indices_list.append([positive, positive + 1, positive + 2])
-                    positive += 2
-
-        indices_list[(self.unit_cells * 4) + 1][0] = indices_list[0][0]
-        indices_list[-1][-1] = indices_list[self.unit_cells * 4][-1]
-
-        j = (self.unit_cells * 4) + 1
-        indices_list.append(
-            [
-                indices_list[1][1],
-                indices_list[3][1],
-                indices_list[1 + j][1],
-                indices_list[3 + j][1],
-            ]
-        )
-        for i in range(1, self.unit_cells):
-            t = 1 + (4 * i)
-            indices_list[t + j][1] = indices_list[t][1]
-            indices_list[t + j + 2][1] = indices_list[t + 2][1]
-
-        return indices_list
-
-    def expectation_norm_legs_indices(self) -> list:
-        indices_list = []
-        positive = 1
-        for w in range(2):
-            for i in range(0, (self.unit_cells * 4) + 1):
-                if i % 2 == 0:
-                    indices_list.append([positive, positive + 1])
-                    positive += 1
-                else:
-                    indices_list.append([positive, positive + 1, positive + 2])
-                    positive += 2
-
-        indices_list[(self.unit_cells * 4) + 1][0] = indices_list[0][0]
-        indices_list[-1][-1] = indices_list[self.unit_cells * 4][-1]
-
-        j = (self.unit_cells * 4) + 1
-        for i in range(self.unit_cells):
-            t = 1 + (4 * i)
-            indices_list[t + j][1] = indices_list[t][1]
-            indices_list[t + j + 2][1] = indices_list[t + 2][1]
-
-        return indices_list
 
     def indices_even_odd_bond(self) -> np.ndarray:
         len_mps = self.unit_cells * 4
@@ -318,36 +205,17 @@ class iTEBD:
                     )
                 )
 
-        # return sum(expectation_value)
         return expectation_value
 
     def expectation_bond(
             self,
             mps: list,
-            operator: dict,
+            operator: list,
             bond_index: int,
     ) -> float:
         index = bond_index - 1
         mps = [mps[i % len(mps)] for i in range(4 * index, len(mps) + (4 * index))]
-
-        tensor_chain = []
-        for j in range((self.unit_cells * 4) + 1):
-            tensor_chain.append(mps[self.MPS_NODE_INDICES[0][j]])
-
-        for j in range((self.unit_cells * 4) + 1):
-            tensor_chain.append(np.conj(mps[self.MPS_NODE_INDICES[0][j]]))
-
-        norm = ncon(
-            tensor_chain,
-            self.expectation_norm_legs_indices()
-        )
-
-        tensor_chain.append(operator)
-
-        return ncon(
-            tensor_chain,
-            self.EXPECTATION_CONTRACT_LEGS_ONE_UNIT_CELL_INDICES
-        ) / norm
+        return self.bond(mps, operator) / self.norm(mps)
 
     def expectation_single_site_mag(
             self,
@@ -360,18 +228,6 @@ class iTEBD:
             index = unit_cell_index - 1
             mps = [mps[i % len(mps)] for i in range(4 * index, len(mps) + (4 * index))]
 
-        tensor_chain = []
-        for j in range((self.unit_cells * 4) + 1):
-            tensor_chain.append(mps[self.MPS_NODE_INDICES[0][j]])
-
-        for j in range((self.unit_cells * 4) + 1):
-            tensor_chain.append(np.conj(mps[self.MPS_NODE_INDICES[0][j]]))
-
-        norm = ncon(
-            tensor_chain,
-            self.expectation_norm_legs_indices()
-        )
-
         str_len = int(2 * np.log2(self.phy_dim))
         hamil_str = ''
         for i in range(str_len):
@@ -380,12 +236,7 @@ class iTEBD:
             else:
                 hamil_str += 'i'
         operator = hamil.Hamiltonian(matrix_type=self.matrix_type).encode_hamil([hamil_str])
-        tensor_chain.append(operator['AB'])
-
-        return ncon(
-            tensor_chain,
-            self.EXPECTATION_CONTRACT_LEGS_ONE_UNIT_CELL_INDICES
-        ) / norm
+        return self.bond(mps, operator['AB']) / self.norm(mps)
 
     def expectation_all_sites_mag(
             self,
@@ -417,6 +268,136 @@ class iTEBD:
 
             mag_dict[f'mean_{mag}'] = np.mean(mag_dict[mag])
 
-        mag_dict['mag_value'] = np.sqrt(mag_dict['mean_x']**2 + mag_dict['mean_y']**2 + mag_dict['mean_z']**2)
+        mag_dict['mag_value'] = np.sqrt(mag_dict['mean_x'] ** 2 + mag_dict['mean_y'] ** 2 + mag_dict['mean_z'] ** 2)
 
         return mag_dict
+
+    def norm(
+            self,
+            mps: list
+    ) -> float:
+        mps_len = len(mps)
+        norm = ncon(
+            [
+                mps[mps_len - 1],
+                np.conj(mps[mps_len - 1]),
+            ],
+            [
+                [1, -1], [1, -2]
+            ]
+        )
+
+        for i in range(mps_len - 1):
+            if i % 2 == 0:
+                norm = ncon(
+                    [
+                        norm,
+                        mps[i],
+                        np.conj(mps[i]),
+                    ],
+                    [
+                        [1, 2], [1, 3, -1], [2, 3, -2]
+                    ]
+                )
+            else:
+                norm = ncon(
+                    [
+                        norm,
+                        mps[i],
+                        np.conj(mps[i]),
+                    ],
+                    [
+                        [1, 2], [1, -1], [2, -2]
+                    ]
+                )
+
+        norm = ncon(
+            [
+                norm,
+                mps[mps_len - 1],
+                np.conj(mps[mps_len - 1]),
+            ],
+            [
+                [1, 2], [1, 3], [2, 3]
+            ]
+        )
+
+        return norm
+
+    def bond(
+            self,
+            mps: list,
+            operator: list
+    ) -> float:
+        mps_len = len(mps)
+        bond = ncon(
+            [
+                mps[mps_len - 1],
+                np.conj(mps[mps_len - 1]),
+            ],
+            [
+                [1, -1], [1, -2]
+            ]
+        )
+
+        bond = ncon(
+            [
+                bond,
+                mps[0],
+                mps[1],
+                mps[2],
+                np.conj(mps[0]),
+                np.conj(mps[1]),
+                np.conj(mps[2]),
+            ],
+            [
+                [1, 2], [1, -1, 3], [3, 4], [4, -2, -3], [2, -4, 5], [5, 6], [6, -5, -6],
+            ]
+        )
+
+        bond = ncon(
+            [
+                bond,
+                operator,
+            ],
+            [
+                [1, 2, -1, 4, 5, -2], [1, 2, 4, 5],
+            ]
+        )
+
+        for i in range(3, mps_len - 1):
+            if i % 2 == 0:
+                bond = ncon(
+                    [
+                        bond,
+                        mps[i],
+                        np.conj(mps[i]),
+                    ],
+                    [
+                        [1, 2], [1, 3, -1], [2, 3, -2]
+                    ]
+                )
+            else:
+                bond = ncon(
+                    [
+                        bond,
+                        mps[i],
+                        np.conj(mps[i]),
+                    ],
+                    [
+                        [1, 2], [1, -1], [2, -2]
+                    ]
+                )
+
+        bond = ncon(
+            [
+                bond,
+                mps[mps_len - 1],
+                np.conj(mps[mps_len - 1]),
+            ],
+            [
+                [1, 2], [1, 3], [2, 3]
+            ]
+        )
+
+        return bond
