@@ -9,3 +9,5 @@ __pycache__/
 #Egg info files produced by pip installation
 *egg-info
 
+/logs/*.csv
+
