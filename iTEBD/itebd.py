@@ -91,7 +91,7 @@ class iTEBD:
         iter_value = int(iteration / delta_steps)
         self.accuracy = accuracy
 
-        print(f'iTEBD is running... \nPhysical Dim: {self.phy_dim} \nBond Dim: {self.vir_dim}')
+        print(f'Physical Dim: {self.phy_dim} \nBond Dim: {self.vir_dim} \niTEBD is running...')
         for self.delta in np.linspace(delta_start, delta_end, delta_steps):
             self.evolution(
                 self.suzuki_trotter(self.delta),
