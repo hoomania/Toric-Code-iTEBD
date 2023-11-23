@@ -21,6 +21,7 @@ class iTEBD:
         self.unit_cells = unit_cells
         self.matrix_type = hamiltonian['matrix_type']
 
+        self.random_seed = 0
         self.mps = self.initial_mps()
         self.phy_vir_dim = self.phy_dim * self.vir_dim
         self.delta = 0
@@ -35,6 +36,15 @@ class iTEBD:
             [2, 5, -2, -3],
         ]
         self.INDICES_EVEN_ODD_BOND = self.indices_even_odd_bond()
+
+    def set_hamiltonian(self, hamiltonian: dict):
+        self.hamil = hamiltonian
+
+    def set_mps(self, mps: list):
+        self.mps = mps
+
+    def set_random_seed(self, seed: int):
+        self.random_seed = seed
 
     def indices_even_odd_bond(self) -> np.ndarray:
         len_mps = self.unit_cells * 4
@@ -53,6 +63,9 @@ class iTEBD:
         return np.reshape(index_divider, (2, self.unit_cells, 5))
 
     def initial_mps(self) -> list:
+        if self.random_seed is not None:
+            np.random.seed(self.random_seed)
+
         nodes = []
         for i in range(0, self.unit_cells * 2):
             gamma = np.random.rand(self.vir_dim, self.phy_dim, self.vir_dim)

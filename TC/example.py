@@ -1,5 +1,3 @@
-# from tc_itebd.iTEBD import hamiltonian as hml, itebd as tebd
-# from tc_itebd.storage import export as datalog
 from iTEBD import hamiltonian as hml, itebd as tebd
 from storage import export as datalog
 import numpy as np
